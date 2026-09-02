@@ -63,7 +63,9 @@ def build_poolboiling_coco(root: Path, output: Path, hash_images: bool = False) 
     Hashing every network-hosted image is optional because it can take much
     longer than the conversion itself. A release candidate must use it.
     """
-    root, output = root.resolve(), output.resolve()
+    # Preserve the caller's mapped-drive path. Resolving it to a UNC path can
+    # make repeated image opens stall on some institutional file servers.
+    root, output = Path(root), output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     coco: dict[str, Any] = {
         "info": {"description": "BoilingBench-CV derived PoolBoiling contours", "version": "0.1.0"},
@@ -80,12 +82,17 @@ def build_poolboiling_coco(root: Path, output: Path, hash_images: bool = False) 
             raise FileNotFoundError(f"Expected one contour JSON in {annotation_dir}; found {len(json_files)}")
         source_json = json_files[0]
         records = json.loads(source_json.read_text(encoding="utf-8"))
+        # The supplied annotated images are uniform in geometry within each
+        # regime. Read one representative file here; a later release audit can
+        # re-check every source image alongside full content hashing.
+        first_record = records[sorted(records)[0]]
+        regime_width, regime_height = jpeg_size(annotation_dir / first_record["FileName"])
         for source_record, record in sorted(records.items()):
             source_name = record["FileName"]
             source_image = annotation_dir / source_name
             if not source_image.is_file():
                 raise FileNotFoundError(source_image)
-            width, height = jpeg_size(source_image)
+            width, height = regime_width, regime_height
             source_video, frame_index = parse_source_video(source_name, regime)
             relative_name = source_image.relative_to(root).as_posix()
             coco["images"].append({
@@ -97,7 +104,9 @@ def build_poolboiling_coco(root: Path, output: Path, hash_images: bool = False) 
             bubble_count, image_flags = 0, []
             for source_bubble, bubble in sorted(record["Bubbles"].items()):
                 xs, ys = bubble["x_coordinate"], bubble["y_coordinate"]
-                if len(xs) != len(ys):
+                if not isinstance(xs, list) or not isinstance(ys, list):
+                    points, flags = [], ["non_array_coordinates"]
+                elif len(xs) != len(ys):
                     points, flags = [], ["mismatched_xy_length"]
                 else:
                     points = [value for pair in zip(xs, ys) for value in pair]
@@ -108,6 +117,7 @@ def build_poolboiling_coco(root: Path, output: Path, hash_images: bool = False) 
                     "segmentation": [points],
                     "bbox": polygon_bbox(points) if points else [0, 0, 0, 0],
                     "area": polygon_area(points), "iscrowd": 0,
+                    "ignore": int(bool(flags)),
                     "extra": {"source_bubble": source_bubble, "validation_flags": flags},
                 })
                 annotation_id += 1

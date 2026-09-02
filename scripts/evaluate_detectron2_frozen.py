@@ -98,7 +98,7 @@ def main() -> None:
         images = images[: args.limit]
     by_image: dict[int, list[dict]] = defaultdict(list)
     for annotation in coco["annotations"]:
-        if annotation["image_id"] in wanted:
+        if annotation["image_id"] in wanted and not annotation.get("ignore", 0):
             by_image[annotation["image_id"]].append(annotation)
     predictor = build_predictor(args.weights, args.score_threshold, args.device)
     rows = []

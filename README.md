@@ -58,6 +58,7 @@ python scripts/validate_benchmark.py --annotations data\processed\poolboiling-v0
 ```
 
 This creates a derived manifest and canonical instance annotations; it does not copy or alter raw source images or annotations.
+Add `--hash-images` for a release candidate; it is intentionally optional for a fast local screening run on a network drive.
 
 ## Model comparison policy
 

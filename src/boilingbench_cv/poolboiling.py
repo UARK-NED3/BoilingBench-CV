@@ -57,8 +57,12 @@ def parse_source_video(filename: str, regime: str) -> tuple[str, int]:
     return f"{power}.mp4", int(frame)
 
 
-def build_poolboiling_coco(root: Path, output: Path) -> dict[str, Any]:
-    """Create derived COCO-style records and a source manifest from contour JSON."""
+def build_poolboiling_coco(root: Path, output: Path, hash_images: bool = False) -> dict[str, Any]:
+    """Create derived COCO-style records and a source manifest from contour JSON.
+
+    Hashing every network-hosted image is optional because it can take much
+    longer than the conversion itself. A release candidate must use it.
+    """
     root, output = root.resolve(), output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     coco: dict[str, Any] = {
@@ -110,7 +114,7 @@ def build_poolboiling_coco(root: Path, output: Path) -> dict[str, Any]:
                 bubble_count += 1
             manifest_rows.append({
                 "image_id": image_id, "relative_file_name": relative_name, "source_path": str(source_image),
-                "sha256": sha256(source_image), "regime": regime,
+                "sha256": sha256(source_image) if hash_images else "", "regime": regime,
                 "fluid": "H2O" if regime.endswith("H2O") else "HFE-7100",
                 "surface": regime.split("-")[0], "source_video": source_video,
                 "frame_index": frame_index, "source_record": source_record,

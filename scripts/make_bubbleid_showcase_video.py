@@ -21,10 +21,10 @@ from detectron2.engine import DefaultPredictor
 
 
 DEFAULT_CLIPS = (
-    ("FCu-H2O | water on fluorinated copper | 100 W", "FCu-H2O/100W.mp4", 30),
-    ("PCu-H2O | water on plain copper | 10 W", "PCu-H2O/10W.mp4", 0),
-    ("PSi-HFE | HFE-7100 on polished silicon | 6 W", "PSi-HFE/6W.mp4", 0),
-    ("SSi-HFE | HFE-7100 on smooth silicon | 6 W", "SSi-HFE/6W.mp4", 0),
+    ("Water on copper foam | 100 W", "FCu-H2O/100W.mp4", 30),
+    ("Water on flat copper | 10 W", "PCu-H2O/10W.mp4", 0),
+    ("HFE 7100 on flat Si | 6 W", "PSi-HFE/6W.mp4", 0),
+    ("HFE 7100 on silicon micropillars | 6 W", "SSi-HFE/6W.mp4", 0),
 )
 
 
@@ -136,7 +136,7 @@ def main() -> None:
             path = args.video_root / relative_path
             if not path.is_file():
                 raise FileNotFoundError(path)
-            write_title(writer, f"Segment {clip_index}/4 — {label}", f"Source: {relative_path}; start frame: {start_frame}", int(args.fps))
+            write_title(writer, f"Segment {clip_index}/4: {label}", f"Source: {relative_path}; start frame: {start_frame}", int(args.fps))
             capture = cv2.VideoCapture(str(path))
             capture.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
             shown = 0

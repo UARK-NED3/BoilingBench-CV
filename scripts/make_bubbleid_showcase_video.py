@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import cv2
+import imageio_ffmpeg
 import numpy as np
 import torch
 from detectron2 import model_zoo
@@ -56,12 +57,28 @@ def overlay_instances(frame: np.ndarray, masks: np.ndarray) -> np.ndarray:
     return output
 
 
+def fit_without_distortion(image: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """Letterbox an image into ``size`` while preserving every pixel's aspect ratio."""
+    target_width, target_height = size
+    height, width = image.shape[:2]
+    scale = min(target_width / width, target_height / height)
+    resized_width, resized_height = round(width * scale), round(height * scale)
+    resized = cv2.resize(image, (resized_width, resized_height), interpolation=cv2.INTER_AREA)
+    fitted = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+    x = (target_width - resized_width) // 2
+    y = (target_height - resized_height) // 2
+    fitted[y : y + resized_height, x : x + resized_width] = resized
+    return fitted
+
+
 def render_page(left: np.ndarray, right: np.ndarray, title: str, subtitle: str) -> np.ndarray:
     canvas = np.zeros((1080, 1920, 3), dtype=np.uint8)
     display_size = (930, 523)
     y = 285
-    canvas[y : y + display_size[1], 20 : 20 + display_size[0]] = cv2.resize(left, display_size, interpolation=cv2.INTER_AREA)
-    canvas[y : y + display_size[1], 970 : 970 + display_size[0]] = cv2.resize(right, display_size, interpolation=cv2.INTER_AREA)
+    # The pool-boiling sources have different native aspect ratios.  Letterboxing
+    # retains their geometry instead of stretching tall HFE frames into 16:9.
+    canvas[y : y + display_size[1], 20 : 20 + display_size[0]] = fit_without_distortion(left, display_size)
+    canvas[y : y + display_size[1], 970 : 970 + display_size[0]] = fit_without_distortion(right, display_size)
     add_text(canvas, title, (30, 62), 0.92)
     add_text(canvas, subtitle, (30, 101), 0.58)
     add_text(canvas, "Raw camera frame", (20, 255), 0.68)
@@ -70,14 +87,18 @@ def render_page(left: np.ndarray, right: np.ndarray, title: str, subtitle: str) 
     return canvas
 
 
-def write_title(writer: cv2.VideoWriter, title: str, subtitle: str, frames: int) -> None:
+def send_frame(writer, frame: np.ndarray) -> None:
+    writer.send(frame.tobytes())
+
+
+def write_title(writer, title: str, subtitle: str, frames: int) -> None:
     canvas = np.zeros((1080, 1920, 3), dtype=np.uint8)
     add_text(canvas, "BubbleID-base: cross-regime segmentation showcase", (90, 430), 1.1)
     add_text(canvas, title, (90, 500), 0.9)
     add_text(canvas, subtitle, (90, 548), 0.62)
     add_text(canvas, "Frozen pretrained checkpoint; no benchmark-label access or tuning.", (90, 640), 0.6)
     for _ in range(frames):
-        writer.write(canvas)
+        send_frame(writer, canvas)
 
 
 def main() -> None:
@@ -86,9 +107,9 @@ def main() -> None:
     parser.add_argument("--weights", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
-    parser.add_argument("--frames-per-clip", type=int, default=42)
-    parser.add_argument("--stride", type=int, default=3, help="Source frames skipped between displayed frames.")
-    parser.add_argument("--fps", type=float, default=20.0)
+    parser.add_argument("--frames-per-clip", type=int, default=75)
+    parser.add_argument("--stride", type=int, default=1, help="Source frames skipped between displayed frames.")
+    parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--score-threshold", type=float, default=0.5)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -99,9 +120,15 @@ def main() -> None:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.summary.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(str(args.output), cv2.VideoWriter_fourcc(*"mp4v"), args.fps, (1920, 1080))
-    if not writer.isOpened():
-        raise RuntimeError(f"Could not open video output: {args.output}")
+    # H.264 / yuv420p improves compatibility with VLC, PowerPoint, and browser
+    # players compared with OpenCV's platform-dependent MPEG-4 writer.
+    writer = imageio_ffmpeg.write_frames(
+        str(args.output), (1920, 1080), fps=args.fps, codec="libx264",
+        pix_fmt_in="bgr24", pix_fmt_out="yuv420p",
+        macro_block_size=1,
+        output_params=["-crf", "18", "-preset", "medium", "-movflags", "+faststart"],
+    )
+    writer.send(None)
     model = predictor(args.weights, args.score_threshold, args.device)
     records: list[dict] = []
     try:
@@ -128,7 +155,7 @@ def main() -> None:
                 if len(masks) >= 100:
                     count_text += " (model display limit reached)"
                 page = render_page(frame, overlay_instances(frame, masks), label, f"Source frame {source_frame} | {count_text}")
-                writer.write(page)
+                send_frame(writer, page)
                 shown += 1
                 source_frames.append(source_frame)
                 prediction_counts.append(int(len(masks)))
@@ -141,11 +168,11 @@ def main() -> None:
             records.append({"label": label, "source_video": str(path), "start_frame": start_frame,
                             "displayed_source_frames": source_frames, "predicted_instance_counts": prediction_counts})
     finally:
-        writer.release()
+        writer.close()
     args.summary.write_text(json.dumps({"purpose": "qualitative frozen-checkpoint BubbleID-base demonstration",
                                         "weights": str(args.weights), "score_threshold": args.score_threshold,
                                         "device": args.device, "fps": args.fps, "frames_per_clip": args.frames_per_clip,
-                                        "stride": args.stride, "clips": records}, indent=2), encoding="utf-8")
+                                        "stride": args.stride, "codec": "H.264 / yuv420p", "clips": records}, indent=2), encoding="utf-8")
     print(json.dumps({"output": str(args.output), "segments": len(records), "displayed_frames": sum(len(x["displayed_source_frames"]) for x in records)}, indent=2))
 
 

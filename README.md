@@ -2,6 +2,9 @@
 
 `BoilingBench-CV` is a reproducible benchmark framework for computer-vision models that identify bubbles in boiling imagery. Its first release is an **internal seed benchmark**, not yet a public data release or a claim of general validation.
 
+Repository scope, evidence, and reuse boundaries are also available in the
+[NED3 resource manifest](.ned3/resource-manifest-v0.1.json).
+
 ## Decision supported
 
 The benchmark determines which open-source segmentation and tracking approaches provide reliable bubble measurements across distinct boiling-image domains, and whether a replacement for the current BubbleID stack is justified by measured accuracy, domain robustness, and usability.
